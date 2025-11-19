@@ -18,25 +18,15 @@ async function getSheetsClient() {
   return google.sheets({ version: "v4", auth });
 }
 
-// ================== HÀM QUAN TRỌNG ===================
-// ÉP toàn bộ giá trị số thành TEXT để Google Sheets
-// không tự convert '5009618' hoặc mất số 0 đầu
-function forceTextRow(row) {
+// Clean row: nếu có dấu ' do kết quả từ các công thức → bỏ luôn
+function cleanRow(row) {
   return row.map(v => {
-    if (v === null || v === undefined) return v;
-
-    // Nếu là số → ép thành text
-    if (typeof v === "number") return "'" + v;
-
-    // Nếu là chuỗi toàn số → ép text
-    if (typeof v === "string" && /^\d+$/.test(v)) {
-      return "'" + v;
+    if (typeof v === "string" && v.startsWith("'")) {
+      return v.slice(1);
     }
-
     return v;
   });
 }
-// =====================================================
 
 // =====================================================
 // 2. Enterprise Import API
@@ -56,22 +46,25 @@ app.post("/import-data", async (req, res) => {
     const sheets = await getSheetsClient();
 
     // -----------------------------------------------------
-    // STEP 1 — ĐỌC DỮ LIỆU NGUỒN
+    // STEP 1 — ĐỌC DỮ LIỆU NGUỒN (RAW → không còn lỗi dấu ')
     // -----------------------------------------------------
     const read = await sheets.spreadsheets.values.get({
       spreadsheetId: sourceFileId,
-      range: `${sourceSheet}!${sourceRange}`
+      range: `${sourceSheet}!${sourceRange}`,
+      valueRenderOption: "UNFORMATTED_VALUE",   // 🔥 lấy RAW value từ Sheet (không display)
+      dateTimeRenderOption: "FORMATTED_STRING"  // giữ format ngày
     });
 
     const rows = read.data.values || [];
+
     const sd = new Date(startDate);
     const ed = new Date(endDate);
 
     // -----------------------------------------------------
-    // STEP 2 — FILTER BẰNG NODE (cực nhanh)
+    // STEP 2 — FILTER theo ngày (cột I)
     // -----------------------------------------------------
     const filtered = rows.filter(r => {
-      const d = r[8]; // cột I (date)
+      const d = r[8]; // cột I
       if (!d) return false;
 
       const dateObj = new Date(d);
@@ -85,10 +78,10 @@ app.post("/import-data", async (req, res) => {
       });
     }
 
-    // ================== QUAN TRỌNG =======================
-    // Ép TEXT để giữ nguyên ID, số điện thoại, mã khách hàng
-    const fixed = filtered.map(row => forceTextRow(row));
-    // ======================================================
+    // -----------------------------------------------------
+    // STEP 2.5 — CLEAN dữ liệu (nếu vẫn còn dấu ' do input)
+    // -----------------------------------------------------
+    const cleaned = filtered.map(r => cleanRow(r));
 
     // -----------------------------------------------------
     // STEP 3 — CLEAR dữ liệu cũ
@@ -99,22 +92,20 @@ app.post("/import-data", async (req, res) => {
     });
 
     // -----------------------------------------------------
-    // STEP 4 — GHI DỮ LIỆU MỚI (USER_ENTERED để Sheets giữ nguyên text)
+    // STEP 4 — GHI DỮ LIỆU MỚI (RAW → giữ nguyên giá trị)
     // -----------------------------------------------------
-   // STEP 4 — GHI DỮ LIỆU MỚI (RAW, không ép text)
-await sheets.spreadsheets.values.update({
-  spreadsheetId: destFileId,
-  range: `${destSheet}!A2`,
-  valueInputOption: "RAW", 
-  requestBody: {
-    values: filtered   // KHÔNG ép text nữa
-  }
-});
-
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: destFileId,
+      range: `${destSheet}!A2`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: cleaned
+      }
+    });
 
     res.json({
       message: "Import thành công",
-      imported: fixed.length
+      imported: cleaned.length
     });
 
   } catch (err) {
