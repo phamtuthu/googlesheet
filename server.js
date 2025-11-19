@@ -101,14 +101,16 @@ app.post("/import-data", async (req, res) => {
     // -----------------------------------------------------
     // STEP 4 — GHI DỮ LIỆU MỚI (USER_ENTERED để Sheets giữ nguyên text)
     // -----------------------------------------------------
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: destFileId,
-      range: `${destSheet}!A2`,
-      valueInputOption: "USER_ENTERED", // QUAN TRỌNG
-      requestBody: {
-        values: fixed
-      }
-    });
+   // STEP 4 — GHI DỮ LIỆU MỚI (RAW, không ép text)
+await sheets.spreadsheets.values.update({
+  spreadsheetId: destFileId,
+  range: `${destSheet}!A2`,
+  valueInputOption: "RAW", 
+  requestBody: {
+    values: filtered   // KHÔNG ép text nữa
+  }
+});
+
 
     res.json({
       message: "Import thành công",
