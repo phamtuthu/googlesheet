@@ -18,6 +18,26 @@ async function getSheetsClient() {
   return google.sheets({ version: "v4", auth });
 }
 
+// ================== HÀM QUAN TRỌNG ===================
+// ÉP toàn bộ giá trị số thành TEXT để Google Sheets
+// không tự convert '5009618' hoặc mất số 0 đầu
+function forceTextRow(row) {
+  return row.map(v => {
+    if (v === null || v === undefined) return v;
+
+    // Nếu là số → ép thành text
+    if (typeof v === "number") return "'" + v;
+
+    // Nếu là chuỗi toàn số → ép text
+    if (typeof v === "string" && /^\d+$/.test(v)) {
+      return "'" + v;
+    }
+
+    return v;
+  });
+}
+// =====================================================
+
 // =====================================================
 // 2. Enterprise Import API
 // =====================================================
@@ -51,7 +71,7 @@ app.post("/import-data", async (req, res) => {
     // STEP 2 — FILTER BẰNG NODE (cực nhanh)
     // -----------------------------------------------------
     const filtered = rows.filter(r => {
-      const d = r[8]; // cột I
+      const d = r[8]; // cột I (date)
       if (!d) return false;
 
       const dateObj = new Date(d);
@@ -65,6 +85,11 @@ app.post("/import-data", async (req, res) => {
       });
     }
 
+    // ================== QUAN TRỌNG =======================
+    // Ép TEXT để giữ nguyên ID, số điện thoại, mã khách hàng
+    const fixed = filtered.map(row => forceTextRow(row));
+    // ======================================================
+
     // -----------------------------------------------------
     // STEP 3 — CLEAR dữ liệu cũ
     // -----------------------------------------------------
@@ -74,20 +99,20 @@ app.post("/import-data", async (req, res) => {
     });
 
     // -----------------------------------------------------
-    // STEP 4 — GHI DỮ LIỆU MỚI
+    // STEP 4 — GHI DỮ LIỆU MỚI (USER_ENTERED để Sheets giữ nguyên text)
     // -----------------------------------------------------
     await sheets.spreadsheets.values.update({
       spreadsheetId: destFileId,
       range: `${destSheet}!A2`,
-      valueInputOption: "RAW",
+      valueInputOption: "USER_ENTERED", // QUAN TRỌNG
       requestBody: {
-        values: filtered
+        values: fixed
       }
     });
 
     res.json({
       message: "Import thành công",
-      imported: filtered.length
+      imported: fixed.length
     });
 
   } catch (err) {
